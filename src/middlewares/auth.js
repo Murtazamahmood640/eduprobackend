@@ -7,17 +7,30 @@ const jwt = require('jsonwebtoken');
 try {
   if (!admin.apps.length) {
     const serviceAccountPath = path.join(__dirname, '../../firebase-service-account.json');
-    
-    if (fs.existsSync(serviceAccountPath)) {
-      admin.initializeApp({
-        credential: admin.credential.cert(serviceAccountPath)
-      });
-      console.log('✅ Firebase Admin initialized with service account');
+    let credential;
+
+    if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+      console.log('📦 Using Firebase Service Account from environment variable');
+      try {
+        const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+        credential = admin.credential.cert(serviceAccount);
+      } catch (parseErr) {
+        console.error('❌ Error parsing FIREBASE_SERVICE_ACCOUNT env var:', parseErr.message);
+        throw parseErr;
+      }
+    } else if (fs.existsSync(serviceAccountPath)) {
+      console.log('📄 Using Firebase Service Account from local file');
+      credential = admin.credential.cert(serviceAccountPath);
+    }
+
+    if (credential) {
+      admin.initializeApp({ credential });
+      console.log('✅ Firebase Admin initialized successfully');
     } else {
       admin.initializeApp({
         credential: admin.credential.applicationDefault()
       });
-      console.log('⚠️  Firebase Admin initialized with applicationDefault (No service account file found)');
+      console.log('⚠️  Firebase Admin initialized with applicationDefault (No service account found)');
     }
   }
 } catch (e) {
