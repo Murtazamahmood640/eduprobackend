@@ -176,7 +176,7 @@ router.post('/students', verifyToken, isAdmin, async (req, res) => {
     if (user) return res.status(400).json({ message: 'Student already exists' });
 
     const userId = await generateUserId('student');
-    const hashedPassword = await bcrypt.hash(password || 'EduPro123!', 10);
+    const hashedPassword = await bcrypt.hash(password || 'OAKSIS123!', 10);
 
     user = await User.create({
       userId,
@@ -252,7 +252,7 @@ router.get('/courses', verifyToken, isAdmin, async (req, res) => {
   try {
     const { status } = req.query;
     const query = status ? { status } : {};
-    const courses = await Course.find(query).populate('instructor', 'name email').sort({ createdAt: -1 });
+    const courses = await Course.find(query).populate('instructor', 'name email profilePicture').sort({ createdAt: -1 });
     res.json(courses);
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });
@@ -267,7 +267,12 @@ router.patch('/courses/:id/status', verifyToken, isAdmin, async (req, res) => {
   console.log(`[Admin] Status Update Request: Course ${req.params.id} -> ${req.body.status} by ${req.dbUser.email}`);
   try {
     const { status, rejectionReason } = req.body;
-    if (!['Approved', 'Rejected', 'Pending'].includes(status)) {
+    let normStatus = status;
+    if (status && status.toLowerCase() === 'approved') normStatus = 'Approved';
+    if (status && status.toLowerCase() === 'rejected') normStatus = 'Rejected';
+    if (status && status.toLowerCase() === 'pending') normStatus = 'Pending';
+
+    if (!['Approved', 'Rejected', 'Pending'].includes(normStatus)) {
       return res.status(400).json({ message: 'Invalid status' });
     }
 
@@ -276,8 +281,8 @@ router.patch('/courses/:id/status', verifyToken, isAdmin, async (req, res) => {
       return res.status(404).json({ message: 'Course not found' });
     }
 
-    course.status = status;
-    if (status === 'Rejected') {
+    course.status = normStatus;
+    if (normStatus === 'Rejected') {
       course.rejectionReason = rejectionReason || 'No reason provided';
     } else {
       course.rejectionReason = undefined;
@@ -285,7 +290,7 @@ router.patch('/courses/:id/status', verifyToken, isAdmin, async (req, res) => {
 
     await course.save();
 
-    if (status === 'Approved') {
+    if (normStatus === 'Approved') {
       const Quiz = require('../models/Quiz');
       const Assignment = require('../models/Assignment');
       
@@ -299,15 +304,15 @@ router.patch('/courses/:id/status', verifyToken, isAdmin, async (req, res) => {
     // Notify Teacher
     await Notification.create({
       recipient: course.instructor,
-      title: `Course ${status}`,
-      message: status === 'Approved' 
+      title: `Course ${normStatus}`,
+      message: normStatus === 'Approved' 
         ? `Congratulations! Your course "${course.title}" has been approved.`
-        : `Your course "${course.title}" was rejected. Reason: ${rejectionReason}`,
-      type: status === 'Approved' ? 'success' : 'error',
+        : `Your course "${course.title}" was rejected. Reason: ${course.rejectionReason}`,
+      type: normStatus === 'Approved' ? 'success' : 'error',
       link: '/teacher/courses'
     });
 
-    res.json({ message: `Course ${status.toLowerCase()} successfully`, course });
+    res.json({ message: `Course ${normStatus.toLowerCase()} successfully`, course });
   } catch (err) {
     console.error(`❌ [Admin] Status Update Error:`, err);
     res.status(500).json({ message: 'Server error', error: err.message });
@@ -408,6 +413,72 @@ router.patch('/assignments/:id/status', verifyToken, isAdmin, async (req, res) =
     res.json({ message: `Assignment ${status.toLowerCase()} successfully`, assignment });
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
+/**
+ * GET /api/admin/analytics
+ * Get real aggregated platform analytics
+ */
+router.get('/analytics', verifyToken, isAdmin, async (req, res) => {
+  try {
+    const Registration = require('../models/Registration');
+    const Certificate = require('../models/Certificate');
+
+    const [
+      totalStudents,
+      totalTeachers,
+      totalCourses,
+      totalCertificates,
+      totalRegistrations,
+      completedRegistrations,
+    ] = await Promise.all([
+      User.countDocuments({ role: 'student' }),
+      User.countDocuments({ role: 'teacher' }),
+      Course.countDocuments({ status: 'Approved' }),
+      Certificate.countDocuments(),
+      Registration.countDocuments(),
+      Registration.countDocuments({ status: 'completed' }),
+    ]);
+
+    // Monthly student registrations for last 6 months
+    const now = new Date();
+    const monthlyData = [];
+    for (let i = 5; i >= 0; i--) {
+      const start = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const end = new Date(now.getFullYear(), now.getMonth() - i + 1, 1);
+      const [students, registrations] = await Promise.all([
+        User.countDocuments({ role: 'student', createdAt: { $gte: start, $lt: end } }),
+        Registration.countDocuments({ createdAt: { $gte: start, $lt: end } }),
+      ]);
+      monthlyData.push({
+        month: start.toLocaleString('default', { month: 'short' }),
+        students,
+        enrollments: registrations,
+      });
+    }
+
+    // Revenue from course prices × enrollments
+    const courses = await Course.find({}, 'price');
+    const totalRevenue = courses.reduce((sum, c) => sum + (c.price || 0), 0);
+
+    const completionRate = totalRegistrations > 0
+      ? Math.round((completedRegistrations / totalRegistrations) * 100)
+      : 0;
+
+    res.json({
+      totalStudents,
+      totalTeachers,
+      totalCourses,
+      totalCertificates,
+      totalRegistrations,
+      completedRegistrations,
+      completionRate,
+      totalRevenue,
+      monthlyData,
+    });
+  } catch (err) {
+    res.status(500).json({ message: 'Analytics error', error: err.message });
   }
 });
 

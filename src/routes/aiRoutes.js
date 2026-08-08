@@ -37,8 +37,25 @@ router.post('/suggest-outline', verifyToken, async (req, res) => {
 });
 
 /**
+ * @route   POST /api/ai/generate-course
+ * @desc    Generate a complete course blueprint from a title
+ */
+router.post('/generate-course', verifyToken, async (req, res) => {
+  try {
+    const { title } = req.body;
+    if (!title || !String(title).trim()) {
+      return res.status(400).json({ message: 'Course title is required.' });
+    }
+    const blueprint = await aiService.generateCourseBlueprint(String(title).trim());
+    res.json(blueprint);
+  } catch (error) {
+    res.status(500).json({ message: 'AI Intelligence failed to respond.', error: error.message });
+  }
+});
+
+/**
  * @route   POST /api/ai/chat
- * @desc    Chat with EduPro Assistant
+ * @desc    Chat with OAKSIS Assistant
  */
 router.post('/chat', async (req, res) => {
   try {
@@ -52,9 +69,26 @@ router.post('/chat', async (req, res) => {
   }
 });
 
-const pdf = require('pdf-parse');
+const pdfParseModule = require('pdf-parse');
 const mammoth = require('mammoth');
 const upload = require('../middlewares/upload');
+
+async function parsePdfBuffer(buffer) {
+  if (typeof pdfParseModule === 'function') {
+    const data = await pdfParseModule(buffer);
+    return data.text || '';
+  }
+  if (pdfParseModule.PDFParse) {
+    const parser = new pdfParseModule.PDFParse({ data: buffer });
+    const result = await parser.getText();
+    return result.text || '';
+  }
+  if (pdfParseModule.default && typeof pdfParseModule.default === 'function') {
+    const data = await pdfParseModule.default(buffer);
+    return data.text || '';
+  }
+  throw new Error('PDF parsing library is incompatible.');
+}
 
 /**
  * @route   POST /api/ai/extract-text
@@ -72,18 +106,20 @@ router.post('/extract-text', verifyToken, upload.single('file'), async (req, res
     const mimetype = req.file.mimetype;
     const filename = req.file.originalname;
 
-    console.log(`📑 Processing ${filename} (${mimetype}, ${buffer.length} bytes)`);
+    console.log(`📑 Processing ${filename} (${mimetype}, ${buffer ? buffer.length : 0} bytes)`);
+
+    if (!buffer || buffer.length === 0) {
+      return res.status(400).json({ message: 'Uploaded file is empty.' });
+    }
 
     if (mimetype === 'application/pdf' || filename.toLowerCase().endsWith('.pdf')) {
       try {
         console.log("🛠️ Attempting PDF Parse for:", filename);
-        const data = await pdf(buffer);
-        text = data.text;
+        text = await parsePdfBuffer(buffer);
         console.log(`✅ Extracted ${text.length} characters from PDF.`);
       } catch (pdfErr) {
-        console.error('❌ PDF Parse Error:', pdfErr.message);
-        // Fallback to simpler extraction or specific error
-        if (pdfErr.message.includes('password')) {
+        console.error('❌ PDF Parse Error:', pdfErr);
+        if (pdfErr.message && pdfErr.message.includes('password')) {
           throw new Error('This PDF is password protected and cannot be read.');
         }
         throw new Error('PDF structure is unreadable. Please try a different PDF or copy-paste text.');
@@ -96,12 +132,12 @@ router.post('/extract-text', verifyToken, upload.single('file'), async (req, res
     ) {
       try {
         const result = await mammoth.extractRawText({ buffer: buffer });
-        text = result.value;
+        text = result.value || '';
       } catch (wordErr) {
         console.error('❌ Word Parse Error:', wordErr);
         throw new Error('Word document structure is unreadable.');
       }
-    } else if (mimetype === 'text/plain' || filename.toLowerCase().endsWith('.txt') || filename.toLowerCase().endsWith('.md')) {
+    } else if (mimetype === 'text/plain' || filename.toLowerCase().endsWith('.txt') || filename.toLowerCase().endsWith('.md') || filename.toLowerCase().endsWith('.json')) {
       text = buffer.toString('utf-8');
     } else {
       console.warn('⚠️ Unsupported Mimetype:', mimetype, 'Filename:', filename);
@@ -109,10 +145,10 @@ router.post('/extract-text', verifyToken, upload.single('file'), async (req, res
     }
 
     if (!text || text.trim().length < 5) {
-      throw new Error('Document seems to be empty or unreadable.');
+      throw new Error('Document seems to be empty or contains no readable text.');
     }
 
-    res.json({ text: text.trim().substring(0, 8000) }); // Increased limit to 8k
+    res.json({ text: text.trim().substring(0, 8000) });
   } catch (error) {
     console.error('❌ Extraction Service Error:', error);
     res.status(500).json({ message: error.message || 'Failed to extract text from document.' });

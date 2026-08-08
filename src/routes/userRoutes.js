@@ -5,6 +5,7 @@ const User = require('../models/User');
 const Registration = require('../models/Registration');
 const Quiz = require('../models/Quiz');
 const Assignment = require('../models/Assignment');
+const Certificate = require('../models/Certificate');
 const { generateUserId } = require('../utils/generateUserId');
 
 // Get current user profile
@@ -25,18 +26,25 @@ router.get('/student-stats', verifyToken, async (req, res) => {
     ]);
     
     // Average progress
-    const avgProgress = registrations.length > 0 
+    const avgProgress = registrations.length > 0
       ? Math.round(registrations.reduce((acc, curr) => acc + curr.progress, 0) / registrations.length)
       : 0;
 
-    res.json({
+    // Count actual certificates
+    const credentialsEarned = await Certificate.countDocuments({ student: req.dbUser._id });
+
+    const responseObj = {
       activeModules,
       completedModules,
       overallMastery: avgProgress,
       examsPending: quizCount + assignmentCount,
-      credentialsEarned: completedModules
-    });
+      credentialsEarned
+    };
+    
+    console.log('Sending student stats:', responseObj);
+    res.json(responseObj);
   } catch (error) {
+    console.error('Error in student-stats:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });

@@ -69,6 +69,9 @@ const notificationRoutes = require('./src/routes/notificationRoutes');
 const aiRoutes = require('./src/routes/aiRoutes');
 const facultyRoutes = require('./src/routes/facultyRoutes');
 const certificateRoutes = require('./src/routes/certificateRoutes');
+const resultRoutes = require('./src/routes/resultRoutes');
+const paymentRoutes = require('./src/routes/paymentRoutes');
+const couponRoutes = require('./src/routes/couponRoutes');
 
 // Mount routes
 app.use('/api/upload', uploadRoutes);
@@ -85,6 +88,9 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/faculty', facultyRoutes);
 app.use('/api/certificates', certificateRoutes);
+app.use('/api/results', resultRoutes);
+app.use('/api/payments', paymentRoutes);
+app.use('/api/coupons', couponRoutes);
 
 // Basic route
 app.get('/', (req, res) => {
@@ -99,6 +105,41 @@ app.use((req, res) => {
 
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
+});
+
+// Handle server errors
+server.on('error', (error) => {
+  if (error.code === 'EADDRINUSE') {
+    console.error(`Port ${PORT} is already in use`);
+  } else {
+    console.error('Server error:', error);
+  }
+});
+
+// Handle process termination
+process.on('SIGTERM', () => {
+  console.log('SIGTERM received, shutting down gracefully');
+  server.close(() => {
+    console.log('Server closed');
+    process.exit(0);
+  });
+});
+
+process.on('SIGINT', () => {
+  console.log('SIGINT received, shutting down gracefully');
+  server.close(() => {
+    console.log('Server closed');
+    process.exit(0);
+  });
+});
+
+// Prevent unhandled errors from crashing the server
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
 });

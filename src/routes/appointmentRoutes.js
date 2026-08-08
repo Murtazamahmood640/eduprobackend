@@ -7,7 +7,7 @@ const { verifyToken } = require('../middlewares/auth');
 
 // Helper to generate a Jitsi meeting link
 const generateMeetingLink = () => {
-  const roomId = `EduPro-${crypto.randomBytes(6).toString('hex')}`;
+  const roomId = `OAKSIS-${crypto.randomBytes(6).toString('hex')}`;
   return `https://meet.jit.si/${roomId}#config.startWithAudioMuted=true&config.startWithVideoMuted=true`;
 };
 
@@ -40,7 +40,21 @@ router.get('/student', verifyToken, async (req, res) => {
 // Student requests an appointment
 router.post('/', verifyToken, async (req, res) => {
   try {
+    if (!req.dbUser) {
+      return res.status(401).json({ message: 'User profile not found. Please complete your profile setup.' });
+    }
+
     const { instructorId, courseId, topic, date, duration, notes } = req.body;
+
+    console.log('Appointment request data:', {
+      instructorId,
+      courseId,
+      topic,
+      date,
+      duration,
+      studentId: req.dbUser._id
+    });
+
     const appointment = new Appointment({
       student: req.dbUser._id,
       instructor: instructorId,
@@ -50,21 +64,32 @@ router.post('/', verifyToken, async (req, res) => {
       duration: duration || 60,
       notes
     });
-    await appointment.save();
-    await appointment.populate('instructor', 'name email');
-    const savedAppointment = await appointment.save();
 
-    // Notify Teacher
-    await Notification.create({
-      recipient: instructorId,
-      title: 'New Appointment Request',
-      message: `A student has requested a session for ${req.dbUser.name}.`,
-      type: 'info',
-      link: '/teacher/appointments'
-    });
+    console.log('Saving appointment...');
+    await appointment.save();
+    console.log('Appointment saved successfully');
+
+    await appointment.populate('instructor', 'name email');
+    const savedAppointment = appointment;
+
+    // Notify Teacher (optional - don't fail if notification fails)
+    try {
+      await Notification.create({
+        recipient: instructorId,
+        title: 'New Appointment Request',
+        message: `A student has requested a session for ${req.dbUser.name}.`,
+        type: 'info',
+        link: '/teacher/appointments'
+      });
+      console.log('Notification created');
+    } catch (notifError) {
+      console.error('Notification creation failed (non-critical):', notifError);
+      // Continue even if notification fails
+    }
 
     res.status(201).json(savedAppointment);
   } catch (error) {
+    console.error('Appointment creation error:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
@@ -72,34 +97,65 @@ router.post('/', verifyToken, async (req, res) => {
 // Teacher updates appointment status
 router.patch('/:id/status', verifyToken, async (req, res) => {
   try {
-    const { status } = req.body;
+    const { status, rejectionReason } = req.body;
     let { meetingLink } = req.body;
+
+    console.log('Status update request:', { status, rejectionReason, meetingLink, id: req.params.id });
 
     // Auto-generate meeting link if confirming and no link provided
     if (status === 'confirmed' && !meetingLink) {
       meetingLink = generateMeetingLink();
     }
 
+    // Build update using $set to ensure all fields are saved
+    const setFields = { status };
+    if (meetingLink) setFields.meetingLink = meetingLink;
+    if ((status === 'cancelled' || status === 'completed') && rejectionReason) {
+      setFields.rejectionReason = rejectionReason;
+    }
+    // Clear rejectionReason if not a cancellation
+    if (status !== 'cancelled') {
+      setFields.rejectionReason = '';
+    }
+    if (status === 'cancelled' && rejectionReason) {
+      setFields.rejectionReason = rejectionReason;
+    }
+
+    console.log('Saving fields:', setFields);
+
     const appointment = await Appointment.findOneAndUpdate(
       { _id: req.params.id, instructor: req.dbUser._id },
-      { status, ...(meetingLink && { meetingLink }) },
-      { new: true }
+      { $set: setFields },
+      { new: true, runValidators: false }
     ).populate('student', 'name email profilePicture')
      .populate('course', 'title');
 
     if (!appointment) return res.status(404).json({ message: 'Appointment not found' });
 
-    // Notify Student
-    await Notification.create({
-      recipient: appointment.student._id,
-      title: `Appointment ${status.charAt(0).toUpperCase() + status.slice(1)}`,
-      message: `Your session with ${req.dbUser.name} has been ${status}.`,
-      type: status === 'confirmed' ? 'success' : 'warning',
-      link: '/student/appointments'
-    });
+    console.log('Updated appointment rejectionReason:', appointment.rejectionReason);
+
+    // Notify Student — include rejection reason if cancelled
+    const notifMessage = status === 'cancelled' && rejectionReason
+      ? `Your session with ${req.dbUser.name} was declined. Reason: ${rejectionReason}`
+      : status === 'completed'
+      ? `Your session with ${req.dbUser.name} has ended.`
+      : `Your session with ${req.dbUser.name} has been ${status}.`;
+
+    try {
+      await Notification.create({
+        recipient: appointment.student._id,
+        title: `Appointment ${status.charAt(0).toUpperCase() + status.slice(1)}`,
+        message: notifMessage,
+        type: status === 'confirmed' ? 'success' : status === 'completed' ? 'info' : 'warning',
+        link: '/student/appointments'
+      });
+    } catch (notifErr) {
+      console.error('Notification failed (non-critical):', notifErr.message);
+    }
 
     res.json(appointment);
   } catch (error) {
+    console.error('Status update error:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });

@@ -95,4 +95,43 @@ router.get('/all', verifyToken, async (req, res) => {
   }
 });
 
+/**
+ * @route   POST /api/certificates/issue-manual
+ * @desc    Manually issue a certificate (Admin Only)
+ */
+router.post('/issue-manual', verifyToken, async (req, res) => {
+  try {
+    if (req.dbUser.role !== 'admin' && req.dbUser.role !== 'superadmin') {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+    const { studentId, courseId, grade } = req.body;
+    if (!studentId || !courseId) {
+      return res.status(400).json({ message: 'studentId and courseId are required.' });
+    }
+
+    // Check if already exists
+    const existing = await Certificate.findOne({ student: studentId, course: courseId });
+    if (existing) {
+      return res.json(existing);
+    }
+
+    const certId = `EDU-${crypto.randomBytes(4).toString('hex').toUpperCase()}-${new Date().getFullYear()}`;
+    const certificate = await Certificate.create({
+      student: studentId,
+      course: courseId,
+      certificateId: certId,
+      issueDate: new Date(),
+      grade: grade || 'Distinction'
+    });
+
+    const populated = await Certificate.findById(certificate._id)
+      .populate('student', 'name email')
+      .populate('course', 'title');
+
+    res.status(201).json(populated);
+  } catch (error) {
+    res.status(500).json({ message: 'Manual issuance failed.', error: error.message });
+  }
+});
+
 module.exports = router;

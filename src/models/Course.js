@@ -18,6 +18,30 @@ const courseSchema = new mongoose.Schema({
     type: Number,
     default: 0
   },
+  originalPrice: {
+    type: Number,
+    default: 0
+  },
+  discountPercent: {
+    type: Number,
+    default: 0
+  },
+  currency: {
+    type: String,
+    default: 'USD'
+  },
+  accessType: {
+    type: String,
+    enum: ['lifetime', 'subscription', 'limited'],
+    default: 'lifetime'
+  },
+  isFree: {
+    type: Boolean,
+    default: false
+  },
+  resources: [{
+    type: String
+  }],
   thumbnail: {
     type: String
   },
@@ -25,12 +49,18 @@ const courseSchema = new mongoose.Schema({
     type: String
   },
   outline: [{
+    module: String,
     sectionTitle: String,
     title: String,
     description: String,
     videoUrl: String,
     pdfUrl: String,
-    textContent: String
+    textContent: String,
+    assignment: {
+      title: String,
+      description: String,
+      points: Number
+    }
   }],
   status: {
     type: String,

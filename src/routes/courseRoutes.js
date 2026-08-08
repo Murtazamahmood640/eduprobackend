@@ -3,10 +3,15 @@ const router = express.Router();
 const Course = require('../models/Course');
 const { verifyToken } = require('../middlewares/auth');
 
-// Get all courses
+// Get all approved courses
 router.get('/', async (req, res) => {
   try {
-    const courses = await Course.find({ status: 'Approved' }).populate('instructor', 'name profilePicture');
+    const courses = await Course.find({
+      $or: [
+        { status: { $regex: /^approved$/i } },
+        { status: { $exists: false } }
+      ]
+    }).populate('instructor', 'name profilePicture').sort({ createdAt: -1 });
     res.json(courses);
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: error.message });

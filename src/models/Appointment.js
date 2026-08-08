@@ -39,6 +39,10 @@ const appointmentSchema = new mongoose.Schema({
   meetingLink: {
     type: String,
     default: ''
+  },
+  rejectionReason: {
+    type: String,
+    default: ''
   }
 }, { timestamps: true });
 

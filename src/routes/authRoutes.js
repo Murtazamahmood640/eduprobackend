@@ -23,10 +23,14 @@ router.post('/send-otp', verifyToken, async (req, res) => {
     user.otpExpiry = otpExpiry;
     await user.save();
 
-    await sendOTPEmail(user.email, otp);
+    const emailSent = await sendOTPEmail(user.email, otp);
 
-    res.json({ message: 'OTP sent successfully' });
+    res.json({ 
+      message: emailSent ? 'OTP sent to your email address.' : 'OTP code generated! Check server console log.',
+      otp: process.env.NODE_ENV !== 'production' ? otp : undefined
+    });
   } catch (error) {
+    console.error('Error in /send-otp:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
